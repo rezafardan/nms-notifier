@@ -1,7 +1,7 @@
 {
   "name": "nms-notifier",
   "version": "1.0.0",
-  "description": "",
+  "description": "Grafana TV Monitor — rotasi dashboard + webhook alert + custom sound",
   "homepage": "https://github.com/rezafardan/nms-notifier#readme",
   "bugs": {
     "url": "https://github.com/rezafardan/nms-notifier/issues"
@@ -15,7 +15,8 @@
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start": "node server.js",
+    "dev": "node --watch server.js"
   },
   "dependencies": {
     "express": "^5.2.1",
