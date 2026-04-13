@@ -20,7 +20,7 @@ const server = http.createServer(app);
 const wss    = new WebSocketServer({ server });
 
 app.use(express.static(path.join(__dirname, 'public')));
-
+app.use(express.json());
 
 app.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
 
@@ -34,6 +34,54 @@ app.get('/api/sounds', (_req, res) => {
   } catch {
     res.json({ sounds: [] });
   }
+});
+
+app.post('/webhook/grafana', (req, res) => {
+  res.sendStatus(200); // Balas 200 DULU biar Grafana tidak timeout
+
+  const body = req.body || {};
+  const status   = (body.status || '').toLowerCase();       // "firing" | "resolved"
+  const receiver = body.receiver || '';
+  const alerts   = body.alerts   || [];
+  const group    = body.groupLabels || {};
+
+  console.log(`[Webhook] group=${group.alertname || JSON.stringify(group)} alerts=${alerts.length} receiver=${receiver} status=${status}`);
+
+  for (const raw of alerts) {
+    const lbl = raw.labels      || {};
+    const ann = raw.annotations || {};
+    const alertStatus = (raw.status || status).toLowerCase();
+
+    const a = {
+      fp:          raw.fingerprint || `wh-${Date.now()}-${Math.random()}`,
+      name:        lbl.alertname   || 'Unknown Alert',
+      severity:    (lbl.severity   || lbl.level || 'warning').toLowerCase(),
+      summary:     ann.summary     || ann.description || lbl.alertname || '',
+      instance:    lbl.instance    || lbl.host || lbl.job || '',
+      startsAt:    raw.startsAt    || new Date().toISOString(),
+      dashboardURL: raw.dashboardURL || raw.generatorURL || '',
+      labels:      lbl,
+      via:         'webhook',
+    };
+
+    if (alertStatus === 'resolved') {
+      prevAlertMap.delete(a.fp);
+      broadcast({ type: 'resolved', alert: a });
+      console.log(`  ✅ Resolved: ${a.name} [${a.labels.device || a.instance || ''}]`);
+    } else {
+      prevAlertMap.set(a.fp, a);
+      broadcast({ type: 'new_alert', alert: a });
+      console.log(`  🔴 Firing: ${a.name} sev=${a.severity} [${a.labels.device || a.instance || ''}]`);
+    }
+  }
+
+  // Sync badge count ke semua client
+  broadcast({ type: 'alert_state', alerts: [...prevAlertMap.values()] });
+});
+
+// ── Test endpoint ─────────────────────────────────────────────────────────
+app.get('/webhook/test', (_req, res) => {
+  res.json({ ok: true, message: 'Webhook endpoint aktif', port: CFG.port });
 });
 
 
