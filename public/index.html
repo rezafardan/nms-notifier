@@ -1,0 +1,652 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>Grafana TV Monitor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet"/>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+:root{
+  --bg:#000;--overlay:rgba(10,11,15,.88);--surface:rgba(22,25,32,.95);
+  --border:rgba(255,255,255,.08);--border2:rgba(255,255,255,.14);
+  --text:#e2e4ec;--muted:#8b8fa8;--faint:#3e4154;
+  --primary:#00d4a8;--primary-d:#009e7e;
+  --crit:#ff4757;--warn:#ffb038;--info:#4a9eff;--ok:#2ed577;
+  --font-mono:'JetBrains Mono',monospace;
+  --font-ui:'Inter',system-ui,sans-serif;
+  --bar-h:56px;
+  --ease:cubic-bezier(0.16,1,0.3,1);
+}
+html,body{height:100%;overflow:hidden;background:var(--bg);
+          font-family:var(--font-ui);color:var(--text);-webkit-font-smoothing:antialiased}
+
+/* ── Iframe stack ──────────────────────────────────────────────────────── */
+#frame-a,#frame-b{
+  position:fixed;inset:0;width:100%;height:100%;
+  border:none;transition:opacity .6s ease;
+}
+#frame-a{z-index:1;opacity:1}
+#frame-b{z-index:2;opacity:0}
+
+/* ── Loading ───────────────────────────────────────────────────────────── */
+#loading{
+  position:fixed;inset:0;z-index:30;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:20px;transition:opacity .5s;
+}
+#loading.hidden{opacity:0;pointer-events:none}
+.spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,.1);
+         border-top-color:var(--primary);border-radius:50%;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+#loading-text{font-size:14px;color:var(--muted)}
+
+/* ── Setup screen ──────────────────────────────────────────────────────── */
+#setup{
+  position:fixed;inset:0;z-index:20;background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:14px;padding:40px;text-align:center;
+}
+#setup.hidden{display:none}
+#setup h2{font-size:20px;color:var(--primary)}
+#setup p{font-size:13px;color:var(--muted);max-width:500px;line-height:1.7}
+#setup code{background:rgba(255,255,255,.06);padding:2px 8px;border-radius:4px;
+            font-family:var(--font-mono);font-size:12px;color:var(--warn)}
+.setup-steps{text-align:left;background:rgba(255,255,255,.04);
+             border:1px solid rgba(255,255,255,.1);border-radius:8px;
+             padding:16px 20px;font-size:12px;color:var(--muted);
+             line-height:2.2;max-width:500px;width:100%}
+.setup-steps b{color:var(--text)}
+#setup-err{color:var(--crit);font-size:12px;min-height:16px}
+
+/* ── Progress bar ──────────────────────────────────────────────────────── */
+#progress-track{
+  position:fixed;bottom:var(--bar-h);left:0;right:0;z-index:10;
+  height:2px;background:rgba(255,255,255,.06);
+}
+#progress-bar{height:100%;width:0;background:var(--primary)}
+
+/* ── Bottom control bar ────────────────────────────────────────────────── */
+#ctrl-bar{
+  position:fixed;bottom:0;left:0;right:0;z-index:11;
+  height:var(--bar-h);background:var(--overlay);
+  border-top:1px solid var(--border);
+  display:flex;align-items:center;gap:0;padding:0 16px;
+  backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+}
+.bar-left{display:flex;flex-direction:column;min-width:0;flex:1;gap:2px}
+#db-folder{font-size:10px;color:var(--muted);text-transform:uppercase;
+           letter-spacing:.6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#db-title{font-size:13px;font-weight:600;color:var(--text);
+          white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:380px}
+.bar-center{display:flex;flex-direction:column;align-items:center;gap:5px;
+            flex-shrink:0;padding:0 20px}
+#dots{display:flex;gap:5px;align-items:center;flex-wrap:nowrap}
+.dot{width:6px;height:6px;border-radius:50%;background:rgba(255,255,255,.2);
+     cursor:pointer;transition:all .2s;flex-shrink:0}
+.dot.active{background:var(--primary);transform:scale(1.5);box-shadow:0 0 6px var(--primary)}
+.dot:hover{background:rgba(255,255,255,.5)}
+.bar-controls{display:flex;align-items:center;gap:5px}
+.btn{display:flex;align-items:center;justify-content:center;
+     width:30px;height:30px;border-radius:6px;
+     border:1px solid rgba(255,255,255,.1);
+     background:rgba(255,255,255,.06);color:var(--muted);cursor:pointer;
+     transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
+.btn:hover{background:rgba(255,255,255,.12);color:var(--text)}
+.btn.active{background:var(--primary-d);border-color:var(--primary);color:#fff}
+.bar-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+#countdown{font-family:var(--font-mono);font-size:14px;font-weight:600;
+           color:var(--primary);min-width:32px;text-align:center}
+select#interval-sel{
+  background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);
+  color:var(--text);border-radius:6px;padding:4px 8px;
+  font-size:12px;cursor:pointer;outline:none;
+}
+select#interval-sel:hover{border-color:var(--primary)}
+select#interval-sel option{background:#1a1d24;color:var(--text)}
+#ws-dot{width:7px;height:7px;border-radius:50%;
+        background:rgba(255,255,255,.15);transition:background .3s}
+#ws-dot.ok   {background:var(--ok);box-shadow:0 0 5px var(--ok)}
+#ws-dot.error{background:var(--crit);box-shadow:0 0 5px var(--crit)}
+
+/* ── Alert badge pojok kiri atas bar ───────────────────────────────────── */
+#alert-badge{
+  position:fixed;bottom:var(--bar-h);left:0;z-index:12;
+  display:flex;align-items:center;gap:5px;padding:4px 10px;
+  background:rgba(255,71,87,.15);border:1px solid rgba(255,71,87,.35);
+  border-bottom:none;border-top-right-radius:7px;
+  font-size:11px;font-weight:600;color:var(--crit);
+  transition:opacity .3s;
+}
+#alert-badge.hidden{opacity:0;pointer-events:none}
+.pulse{width:7px;height:7px;border-radius:50%;background:var(--crit);flex-shrink:0;
+       animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+
+/* ── Toast — pojok KANAN BAWAH ─────────────────────────────────────────── */
+#toast-container{
+  position:fixed;
+  bottom:calc(var(--bar-h) + 14px);
+  right:20px;
+  z-index:9999;
+  display:flex;flex-direction:column-reverse;gap:8px;
+  pointer-events:none;
+}
+.toast{
+  pointer-events:auto;width:340px;
+  background:rgba(14,16,24,.96);
+  border-radius:10px;overflow:hidden;position:relative;
+  box-shadow:0 8px 32px rgba(0,0,0,.7);
+  animation:toastIn .4s var(--ease);
+  backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+}
+.toast.crit    {border-left:3px solid var(--crit)}
+.toast.warn    {border-left:3px solid var(--warn)}
+.toast.info    {border-left:3px solid var(--info)}
+.toast.resolved{border-left:3px solid var(--ok)}
+@keyframes toastIn{
+  from{opacity:0;transform:translateX(36px) scale(.94)}
+  to  {opacity:1;transform:translateX(0)    scale(1)}
+}
+.toast.hiding{animation:toastOut .3s var(--ease) forwards}
+@keyframes toastOut{
+  from{opacity:1;transform:translateX(0);max-height:200px;margin-bottom:0}
+  to  {opacity:0;transform:translateX(36px);max-height:0;margin-bottom:-8px}
+}
+.toast-inner{display:flex;align-items:flex-start;gap:10px;padding:11px 36px 11px 12px}
+.toast-icon{flex-shrink:0;width:28px;height:28px;border-radius:6px;
+            display:flex;align-items:center;justify-content:center;font-size:15px}
+.toast-icon.crit    {background:rgba(255,71,87,.2)}
+.toast-icon.warn    {background:rgba(255,176,56,.2)}
+.toast-icon.info    {background:rgba(74,158,255,.2)}
+.toast-icon.resolved{background:rgba(46,213,119,.2)}
+.toast-body{flex:1;min-width:0}
+.toast-label{font-size:9px;font-weight:700;text-transform:uppercase;
+             letter-spacing:.8px;opacity:.75;margin-bottom:2px}
+.toast.crit     .toast-label{color:var(--crit)}
+.toast.warn     .toast-label{color:var(--warn)}
+.toast.info     .toast-label{color:var(--info)}
+.toast.resolved .toast-label{color:var(--ok)}
+.toast-title{font-weight:700;font-size:12px;color:var(--text);
+             white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.toast-sub  {font-size:11px;color:var(--muted);margin-top:2px;line-height:1.4;
+             display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.toast-meta {font-family:var(--font-mono);font-size:9px;color:var(--faint);margin-top:4px}
+.toast-close{position:absolute;top:8px;right:8px;width:20px;height:20px;
+             display:flex;align-items:center;justify-content:center;
+             border-radius:4px;cursor:pointer;color:var(--faint);font-size:11px}
+.toast-close:hover{background:rgba(255,255,255,.08);color:var(--text)}
+.toast-progress{height:2px;background:rgba(255,255,255,.05)}
+.toast-bar{height:2px;width:100%;transform-origin:left;animation:shrink linear forwards}
+.toast.crit     .toast-bar{background:var(--crit)}
+.toast.warn     .toast-bar{background:var(--warn)}
+.toast.info     .toast-bar{background:var(--info)}
+.toast.resolved .toast-bar{background:var(--ok)}
+@keyframes shrink{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+
+/* ── Keyboard hint ─────────────────────────────────────────────────────── */
+#kb-hint{position:fixed;top:12px;right:14px;z-index:8;
+         font-size:10px;color:rgba(255,255,255,.15);
+         font-family:var(--font-mono);pointer-events:none}
+</style>
+</head>
+<body>
+
+<!-- Loading -->
+<div id="loading">
+  <div class="spinner"></div>
+  <div id="loading-text">Menghubungkan ke Grafana...</div>
+</div>
+
+<!-- Setup screen -->
+<div id="setup" class="hidden">
+  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#00d4a8" stroke-width="1.5">
+    <rect x="2" y="3" width="20" height="14" rx="2"/>
+    <path d="M8 21h8M12 17v4"/>
+  </svg>
+  <h2>Grafana TV Monitor</h2>
+  <p>Tidak ada dashboard ditemukan atau terjadi error koneksi.<br>Pastikan konfigurasi berikut sudah dilakukan:</p>
+  <div class="setup-steps">
+    <div><b>1.</b> Edit <code>grafana.ini</code> di server Grafana:</div>
+    <div>&nbsp;&nbsp;&nbsp;<code>[security]</code></div>
+    <div>&nbsp;&nbsp;&nbsp;<code>allow_embedding = true</code></div>
+    <div>&nbsp;&nbsp;&nbsp;<code>cookie_samesite = disabled</code></div>
+    <div><b>2.</b> Restart service Grafana</div>
+    <div><b>3.</b> Login ke Grafana di browser ini terlebih dahulu</div>
+    <div><b>4.</b> Isi <code>GRAFANA_API_KEY</code> di file <code>.env</code></div>
+    <div><b>5.</b> Restart <code>npm start</code></div>
+  </div>
+  <div id="setup-err"></div>
+</div>
+
+<!-- Iframe A & B untuk crossfade -->
+<iframe id="frame-a" src="about:blank" allowfullscreen></iframe>
+<iframe id="frame-b" src="about:blank" allowfullscreen></iframe>
+
+<!-- Progress bar -->
+<div id="progress-track"><div id="progress-bar"></div></div>
+
+<!-- Alert badge -->
+<div id="alert-badge" class="hidden">
+  <span class="pulse"></span>
+  <span id="alert-badge-txt">0 Alert Aktif</span>
+</div>
+
+<!-- Bottom bar -->
+<div id="ctrl-bar">
+  <!-- Kiri: info dashboard -->
+  <div class="bar-left">
+    <div id="db-folder">—</div>
+    <div id="db-title">Menunggu daftar dashboard...</div>
+  </div>
+
+  <!-- Tengah: dots + kontrol -->
+  <div class="bar-center">
+    <div id="dots"></div>
+    <div class="bar-controls">
+      <button class="btn" id="btn-prev" title="← Sebelumnya">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="15 18 9 12 15 6"/>
+        </svg>
+      </button>
+      <button class="btn active" id="btn-play" title="Space = Play/Pause">
+        <svg id="icon-pause" width="13" height="13" viewBox="0 0 24 24" fill="currentColor">
+          <rect x="6" y="4" width="4" height="16" rx="1"/>
+          <rect x="14" y="4" width="4" height="16" rx="1"/>
+        </svg>
+        <svg id="icon-play" width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style="display:none">
+          <polygon points="5,3 19,12 5,21"/>
+        </svg>
+      </button>
+      <button class="btn" id="btn-next" title="→ Berikutnya">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </button>
+      <button class="btn active" id="btn-sound" title="Toggle suara gagak">
+        <svg id="snd-on" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
+          <path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"/>
+        </svg>
+        <svg id="snd-off" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="display:none">
+          <polygon points="11,5 6,9 2,9 2,15 6,15 11,19 11,5"/>
+          <line x1="23" y1="9" x2="17" y2="15"/>
+          <line x1="17" y1="9" x2="23" y2="15"/>
+        </svg>
+      </button>
+      <button class="btn" id="btn-test" title="Test notifikasi + suara">🐦‍⬛</button>
+    </div>
+  </div>
+
+  <!-- Kanan: countdown + interval + ws status -->
+  <div class="bar-right">
+    <div id="countdown">—</div>
+    <select id="interval-sel">
+      <option value="10000">10 detik</option>
+      <option value="15000" selected>15 detik</option>
+      <option value="20000">20 detik</option>
+      <option value="30000">30 detik</option>
+      <option value="60000">60 detik</option>
+    </select>
+    <div id="ws-dot" title="Status koneksi WebSocket"></div>
+  </div>
+</div>
+
+<!-- Toast — kanan bawah -->
+<div id="toast-container"></div>
+
+<!-- Keyboard hint -->
+<div id="kb-hint">← → Space</div>
+
+<script>
+/* ════════════════════════════════════════════════════════════════════════
+   SUARA GAGAK
+════════════════════════════════════════════════════════════════════════ */
+let audioCtx = null;
+function getACtx() {
+  if (!audioCtx || audioCtx.state === 'closed')
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+function caw(ctx, t, freq, dur, vol) {
+  const o1 = ctx.createOscillator(), o2 = ctx.createOscillator();
+  const g1 = ctx.createGain(),       g2 = ctx.createGain();
+  o1.type = 'sawtooth'; o2.type = 'square';
+  o1.frequency.setValueAtTime(freq, t);
+  o1.frequency.linearRampToValueAtTime(freq * 1.35, t + dur * .25);
+  o1.frequency.linearRampToValueAtTime(freq * .7,   t + dur);
+  o2.frequency.setValueAtTime(freq * .5, t);
+  o2.frequency.linearRampToValueAtTime(freq * .42,  t + dur);
+  g1.gain.setValueAtTime(0, t);
+  g1.gain.linearRampToValueAtTime(vol, t + .012);
+  g1.gain.linearRampToValueAtTime(0,   t + dur);
+  g2.gain.setValueAtTime(vol * .2, t);
+  g2.gain.linearRampToValueAtTime(0,   t + dur);
+  o1.connect(g1); g1.connect(ctx.destination);
+  o2.connect(g2); g2.connect(ctx.destination);
+  o1.start(t); o1.stop(t + dur + .02);
+  o2.start(t); o2.stop(t + dur + .02);
+}
+function playCrow(vol) {
+  vol = vol || .55;
+  try {
+    const ctx = getACtx();
+    if (ctx.state === 'suspended') ctx.resume();
+    const n = ctx.currentTime;
+    caw(ctx, n,       280, .20, vol);
+    caw(ctx, n + .28, 280, .20, vol);
+    caw(ctx, n + .56, 265, .26, vol * .9);
+  } catch(e) {}
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   TOAST
+════════════════════════════════════════════════════════════════════════ */
+function esc(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                        .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+function sevCls(sev) {
+  var s = (sev || '').toLowerCase();
+  if (s === 'critical' || s === 'crit' || s === 'high')   return 'crit';
+  if (s === 'warning'  || s === 'warn' || s === 'medium') return 'warn';
+  if (s === 'info'     || s === 'low')                    return 'info';
+  return 'warn';
+}
+function sevEmoji(cls) {
+  return cls === 'crit' ? '🔴' : cls === 'warn' ? '🟡' : cls === 'info' ? '🔵' : '🟢';
+}
+function sevLabel(cls) {
+  return cls === 'crit' ? 'CRITICAL' : cls === 'warn' ? 'WARNING' : cls === 'info' ? 'INFO' : 'RESOLVED';
+}
+
+function showToast(title, sub, meta, cls, dur) {
+  dur = dur || 10000;
+  var wrap = document.getElementById('toast-container');
+  var visible = wrap.querySelectorAll('.toast:not(.hiding)');
+  if (visible.length >= 5) dismissToast(visible[visible.length - 1]);
+
+  var el = document.createElement('div');
+  el.className = 'toast ' + cls;
+  el.innerHTML =
+    '<div class="toast-inner">' +
+      '<div class="toast-icon ' + cls + '">' + sevEmoji(cls) + '</div>' +
+      '<div class="toast-body">' +
+        '<div class="toast-label">' + sevLabel(cls) + '</div>' +
+        '<div class="toast-title">' + esc(title) + '</div>' +
+        (sub ? '<div class="toast-sub">' + esc(sub) + '</div>' : '') +
+        '<div class="toast-meta">' + esc(meta) + '</div>' +
+      '</div>' +
+    '</div>' +
+    '<div class="toast-progress"><div class="toast-bar" style="animation-duration:' + dur + 'ms"></div></div>' +
+    '<div class="toast-close">✕</div>';
+
+  el.querySelector('.toast-close').onclick = function() { dismissToast(el); };
+  el._timer = setTimeout(function() { dismissToast(el); }, dur);
+  wrap.insertBefore(el, wrap.firstChild);
+}
+
+function dismissToast(el) {
+  if (!el || el.classList.contains('hiding')) return;
+  clearTimeout(el._timer);
+  el.classList.add('hiding');
+  setTimeout(function() { el.remove(); }, 320);
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   STATE
+════════════════════════════════════════════════════════════════════════ */
+var dashboards    = [];
+var grafanaUrl    = '';
+var orgId         = '1';
+var curIdx        = 0;
+var slideInterval = 15000;
+var isPlaying     = true;
+var soundOn       = true;
+var slideTimer    = null;
+var cdownTimer    = null;
+var cdownVal      = 0;
+var alertMap      = {};
+var alertCount    = 0;
+
+/* ════════════════════════════════════════════════════════════════════════
+   ROTASI DASHBOARD
+════════════════════════════════════════════════════════════════════════ */
+var frameA = document.getElementById('frame-a');
+var frameB = document.getElementById('frame-b');
+var topFrame = 'b'; // frame mana yang di depan saat ini
+
+function buildUrl(db) {
+  var slug = db.slug || db.uid;
+  return grafanaUrl + '/d/' + db.uid + '/' + slug +
+         '?kiosk&theme=dark&orgId=' + orgId + '&refresh=30s&from=now-1h&to=now';
+}
+
+function goTo(idx) {
+  if (!dashboards.length) return;
+  curIdx = ((idx % dashboards.length) + dashboards.length) % dashboards.length;
+  var db  = dashboards[curIdx];
+  var url = buildUrl(db);
+
+  // Crossfade: load ke frame yang di belakang, lalu tampilkan
+  if (topFrame === 'b') {
+    // A di belakang, B di depan → load ke A, fade A naik, B turun
+    frameA.src = url;
+    setTimeout(function() {
+      frameA.style.zIndex  = '2'; frameA.style.opacity = '1';
+      frameB.style.zIndex  = '1'; frameB.style.opacity = '0';
+      topFrame = 'a';
+      setTimeout(function() { frameB.src = 'about:blank'; }, 700);
+    }, 80);
+  } else {
+    frameB.src = url;
+    setTimeout(function() {
+      frameB.style.zIndex  = '2'; frameB.style.opacity = '1';
+      frameA.style.zIndex  = '1'; frameA.style.opacity = '0';
+      topFrame = 'b';
+      setTimeout(function() { frameA.src = 'about:blank'; }, 700);
+    }, 80);
+  }
+
+  // Update info
+  document.getElementById('db-folder').textContent = db.folderTitle || 'Dashboard';
+  document.getElementById('db-title').textContent  = db.title;
+  renderDots();
+  resetTimer();
+}
+
+function resetTimer() {
+  clearTimeout(slideTimer);
+  clearInterval(cdownTimer);
+  animateProgress(isPlaying ? slideInterval : 0);
+
+  if (!isPlaying) {
+    document.getElementById('countdown').textContent = '⏸';
+    return;
+  }
+  cdownVal = Math.round(slideInterval / 1000);
+  document.getElementById('countdown').textContent = cdownVal + 's';
+  cdownTimer = setInterval(function() {
+    cdownVal = Math.max(0, cdownVal - 1);
+    document.getElementById('countdown').textContent = cdownVal + 's';
+  }, 1000);
+  slideTimer = setTimeout(function() { goTo(curIdx + 1); }, slideInterval);
+}
+
+function animateProgress(duration) {
+  var bar = document.getElementById('progress-bar');
+  bar.style.transition = 'none';
+  bar.style.width = '0%';
+  void bar.offsetWidth;
+  if (duration > 0) {
+    bar.style.transition = 'width ' + duration + 'ms linear';
+    bar.style.width = '100%';
+  }
+}
+
+function renderDots() {
+  var wrap = document.getElementById('dots');
+  if (dashboards.length <= 1) { wrap.innerHTML = ''; return; }
+  var max = 16;
+  var count = Math.min(dashboards.length, max);
+  var html = '';
+  for (var i = 0; i < count; i++) {
+    var realIdx = dashboards.length > max
+      ? Math.round(i * (dashboards.length - 1) / (count - 1)) : i;
+    var active = realIdx === curIdx;
+    html += '<div class="dot' + (active ? ' active' : '') + '" data-idx="' + realIdx + '" title="' + esc(dashboards[realIdx] ? dashboards[realIdx].title : '') + '"></div>';
+  }
+  wrap.innerHTML = html;
+  wrap.querySelectorAll('.dot').forEach(function(d) {
+    d.addEventListener('click', function() { goTo(parseInt(d.dataset.idx)); });
+  });
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   ALERT BADGE
+════════════════════════════════════════════════════════════════════════ */
+function updateBadge() {
+  var badge = document.getElementById('alert-badge');
+  if (alertCount > 0) {
+    document.getElementById('alert-badge-txt').textContent = alertCount + ' Alert Aktif';
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
+  }
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   WEBSOCKET
+════════════════════════════════════════════════════════════════════════ */
+var ws;
+function connect() {
+  var proto = location.protocol === 'https:' ? 'wss' : 'ws';
+  ws = new WebSocket(proto + '://' + location.host);
+  ws.onopen  = function() { setWs('ok'); };
+  ws.onclose = function() { setWs('error'); setTimeout(connect, 4000); };
+  ws.onerror = function() { ws.close(); };
+  ws.onmessage = function(e) {
+    var m; try { m = JSON.parse(e.data); } catch { return; }
+    handle(m);
+  };
+}
+
+function setWs(s) { document.getElementById('ws-dot').className = 'ws-dot ' + s; }
+
+function handle(m) {
+  var now = new Date().toLocaleTimeString('id-ID');
+
+  if (m.type === 'init') {
+    grafanaUrl    = m.grafanaUrl    || '';
+    orgId         = m.orgId        || '1';
+    slideInterval = m.slideInterval || 15000;
+    document.getElementById('interval-sel').value = String(slideInterval);
+
+    alertMap   = {};
+    alertCount = 0;
+    (m.alerts || []).forEach(function(a) { alertMap[a.fp] = a; alertCount++; });
+    updateBadge();
+
+    if (m.dashboards && m.dashboards.length) {
+      loadDashboards(m.dashboards);
+    } else {
+      showSetupScreen('Menunggu daftar dashboard dari server...');
+    }
+  }
+
+  else if (m.type === 'dashboards') {
+    if (m.dashboards && m.dashboards.length) loadDashboards(m.dashboards);
+    else showSetupScreen('Tidak ada dashboard ditemukan.');
+  }
+
+  else if (m.type === 'new_alert') {
+    var a   = m.alert;
+    var cls = sevCls(a.severity);
+    if (!alertMap[a.fp]) { alertMap[a.fp] = a; alertCount++; }
+    updateBadge();
+    var inst = a.instance ? ' [' + a.instance + ']' : '';
+    showToast(a.name + inst, a.summary,
+              (a.severity || 'ALERT').toUpperCase() + ' • ' + now, cls, 12000);
+    if (soundOn && (cls === 'crit' || cls === 'warn'))
+      playCrow(cls === 'crit' ? .65 : .45);
+  }
+
+  else if (m.type === 'resolved') {
+    var fp = m.alert.fp;
+    if (alertMap[fp]) { delete alertMap[fp]; alertCount = Math.max(0, alertCount - 1); }
+    updateBadge();
+    showToast('✅ Resolved: ' + m.alert.name, m.alert.summary, 'RESOLVED • ' + now, 'resolved', 8000);
+  }
+
+  else if (m.type === 'alert_state') {
+    alertMap   = {};
+    alertCount = 0;
+    (m.alerts || []).forEach(function(a) { alertMap[a.fp] = a; alertCount++; });
+    updateBadge();
+  }
+}
+
+function loadDashboards(list) {
+  dashboards = list;
+  document.getElementById('setup').classList.add('hidden');
+  document.getElementById('loading').classList.add('hidden');
+  renderDots();
+  goTo(0);
+}
+
+function showSetupScreen(msg) {
+  document.getElementById('loading').classList.add('hidden');
+  document.getElementById('setup').classList.remove('hidden');
+  if (msg) document.getElementById('setup-err').textContent = msg;
+}
+
+/* ════════════════════════════════════════════════════════════════════════
+   KONTROL
+════════════════════════════════════════════════════════════════════════ */
+document.getElementById('btn-prev').onclick = function() { goTo(curIdx - 1); };
+document.getElementById('btn-next').onclick = function() { goTo(curIdx + 1); };
+
+document.getElementById('btn-play').onclick = function() {
+  isPlaying = !isPlaying;
+  this.classList.toggle('active', isPlaying);
+  document.getElementById('icon-pause').style.display = isPlaying ? '' : 'none';
+  document.getElementById('icon-play').style.display  = isPlaying ? 'none' : '';
+  if (isPlaying) resetTimer();
+  else {
+    clearTimeout(slideTimer); clearInterval(cdownTimer);
+    document.getElementById('countdown').textContent = '⏸';
+    animateProgress(0);
+  }
+};
+
+document.getElementById('btn-sound').onclick = function() {
+  soundOn = !soundOn;
+  this.classList.toggle('active', soundOn);
+  document.getElementById('snd-on').style.display  = soundOn ? '' : 'none';
+  document.getElementById('snd-off').style.display = soundOn ? 'none' : '';
+};
+
+document.getElementById('btn-test').onclick = function() {
+  playCrow(.6);
+  showToast('Test Notifikasi 🐦‍⬛', 'Toast kanan bawah + suara gagak aktif!',
+            'TEST • ' + new Date().toLocaleTimeString('id-ID'), 'warn', 5000);
+};
+
+document.getElementById('interval-sel').onchange = function() {
+  slideInterval = parseInt(this.value);
+  if (isPlaying) resetTimer();
+};
+
+document.addEventListener('keydown', function(e) {
+  if (e.target.tagName === 'SELECT') return;
+  if (e.key === 'ArrowLeft')  { e.preventDefault(); goTo(curIdx - 1); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); goTo(curIdx + 1); }
+  if (e.key === ' ')          { e.preventDefault(); document.getElementById('btn-play').click(); }
+});
+
+// Mulai
+connect();
+</script>
+</body>
+</html>
