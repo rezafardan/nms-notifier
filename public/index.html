@@ -664,7 +664,7 @@ var frameB=document.getElementById('frame-b');
 
 function buildUrl(db) {
   return grafanaUrl+'/d/'+db.uid+'/'+(db.slug||db.uid)+
-         '?kiosk&theme=dark&orgId='+orgId+'&refresh=30s&from=now-1h&to=now';
+         '?kiosk&theme=dark&orgId='+orgId+'&refresh=30s';
 }
 function goTo(idx) {
   if (!dashboards.length) return;
